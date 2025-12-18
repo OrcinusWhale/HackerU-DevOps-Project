@@ -1,0 +1,82 @@
+[
+  {
+    "id": 1,
+    "name": "Rodriguez PLC",
+    "contact_name": "Valerie Schmidt",
+    "email": "valerie.schmidt@rodriguezplc.com",
+    "phone": "646-276-6936x188",
+    "country": "Venezuela"
+  },
+  {
+    "id": 2,
+    "name": "Griffin-Green",
+    "contact_name": "Dustin Ford",
+    "email": "dustin.ford@griffingreen.com",
+    "phone": "(672)338-3524x2481",
+    "country": "Mayotte"
+  },
+  {
+    "id": 3,
+    "name": "Sutton, Owens and Griffin",
+    "contact_name": "Felicia Duffy",
+    "email": "felicia.duffy@suttonowensandgriffin.com",
+    "phone": "(678)979-4681x47928",
+    "country": "Mauritius"
+  },
+  {
+    "id": 4,
+    "name": "Davis Group",
+    "contact_name": "Brooke Sanchez",
+    "email": "brooke.sanchez@davisgroup.com",
+    "phone": "+1-737-325-3392x0712",
+    "country": "Peru"
+  },
+  {
+    "id": 5,
+    "name": "Pollard Ltd",
+    "contact_name": "Justin Bean",
+    "email": "justin.bean@pollardltd.com",
+    "phone": "333-325-4816x537",
+    "country": "Palestinian Territory"
+  },
+  {
+    "id": 6,
+    "name": "Thomas, Daugherty and Walker",
+    "contact_name": "Marissa Mason",
+    "email": "marissa.mason@thomasdaughertyandwalker.com",
+    "phone": "554.659.6248x58353",
+    "country": "Timor-Leste"
+  },
+  {
+    "id": 7,
+    "name": "Barrett-Taylor",
+    "contact_name": "Kristine Stewart",
+    "email": "kristine.stewart@barretttaylor.com",
+    "phone": "544.635.1194x994",
+    "country": "Japan"
+  },
+  {
+    "id": 8,
+    "name": "Graves-Carr",
+    "contact_name": "Matthew Richardson",
+    "email": "matthew.richardson@gravescarr.com",
+    "phone": "(743)882-3814",
+    "country": "Cape Verde"
+  },
+  {
+    "id": 9,
+    "name": "Brooks-Guzman",
+    "contact_name": "Samantha Garcia",
+    "email": "samantha.garcia@brooksguzman.com",
+    "phone": "3316776203",
+    "country": "Singapore"
+  },
+  {
+    "id": 10,
+    "name": "Richardson Ltd",
+    "contact_name": "Alexandra Kramer",
+    "email": "alexandra.kramer@richardsonltd.com",
+    "phone": "269.682.9111x28864",
+    "country": "Turks and Caicos Islands"
+  }
+]
