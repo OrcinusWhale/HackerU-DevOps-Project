@@ -1,0 +1,19 @@
+
+# --- Local / secrets ---
+*.pem
+*.ppk
+NUL
+data/NUL
+
+# --- Terraform ---
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+.terraform.lock.hcl
+crash.log
+crash.*.log
+
+# --- Zips / generated ---
+*.zip
