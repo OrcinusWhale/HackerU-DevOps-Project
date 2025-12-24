@@ -8,9 +8,14 @@ variable "project_name" {
   default = "devops-final"
 }
 
-variable "instance_type" {
+variable "master_instance_type" {
   type    = string
-  default = "t3.micro"
+  default = "m7i-flex.large"
+}
+
+variable "worker_instance_type" {
+  type    = string
+  default = "m7i-flex.large"
 }
 
 variable "k8s_node_count" {
@@ -38,8 +43,19 @@ variable "data_prefix" {
   default = "ingest/"
 }
 
-variable "ssh_ingress_cidr" {
+variable "ssh_key_name" {
+  type    = string
+  default = ""
+}
+
+variable "ssh_allowed_cidr" {
   type        = string
   default     = "0.0.0.0/0"
-  description = "CIDR allowed to SSH to the EC2 instances (e.g. your public IP/32). Leave empty to disable SSH ingress rule."
+  description = "CIDR allowed to SSH and access NodePorts (e.g. your public IP/32)."
 }
+
+variable "deploy_platform" {
+  type    = bool
+  default = true
+}
+
