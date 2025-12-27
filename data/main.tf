@@ -191,7 +191,7 @@ def handler(event, context):
         return {"statusCode": 200, "body": "Error Handled"}
 PY
 
-# ----------------------------
+  # ----------------------------
   # Platform YAML (Kubernetes Manifests)
   # ----------------------------
   platform_yaml = <<-YAML
@@ -211,9 +211,10 @@ data:
     from http.server import BaseHTTPRequestHandler, HTTPServer
     from confluent_kafka import Producer
 
-    BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP","kafka.platform.svc.cluster.local:9092")
+    BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP","${aws_instance.kafka.private_ip}:9092")
     
     # FIX: Low timeouts to fail fast before Lambda times out
+    print(BOOTSTRAP)
     conf = {
         "bootstrap.servers": BOOTSTRAP,
         "message.timeout.ms": 3000,   # 3 Seconds max
@@ -276,7 +277,7 @@ data:
     INDEX = os.environ["INDEX"]
 
     GROUP = os.environ.get("GROUP", f"{TOPIC}-cg")
-    BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP","kafka.platform.svc.cluster.local:9092")
+    BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP","${aws_instance.kafka.private_ip}:9092")
     ES = os.getenv("ES_URL","http://elasticsearch.platform.svc.cluster.local:9200").rstrip("/")
 
     BULK_DOCS = int(os.getenv("BULK_DOCS", "500"))
@@ -534,7 +535,7 @@ spec:
             - name: PYTHONUNBUFFERED
               value: "1"
             - name: KAFKA_BOOTSTRAP
-              value: kafka.platform.svc.cluster.local:9092
+              value: ${aws_instance.kafka.private_ip}:9092
           command: ["sh","-c"]
           args:
             - pip install --no-cache-dir confluent-kafka==2.5.0 && python -u /code/bridge.py
@@ -588,7 +589,7 @@ spec:
             - name: ES_URL
               value: http://elasticsearch.platform.svc.cluster.local:9200
             - name: KAFKA_BOOTSTRAP
-              value: kafka.platform.svc.cluster.local:9092
+              value: ${aws_instance.kafka.private_ip}:9092
           command: ["sh","-c"]
           args:
             - pip install --no-cache-dir confluent-kafka==2.5.0 && python -u /code/consumer.py
@@ -629,7 +630,7 @@ spec:
             - name: ES_URL
               value: http://elasticsearch.platform.svc.cluster.local:9200
             - name: KAFKA_BOOTSTRAP
-              value: kafka.platform.svc.cluster.local:9092
+              value: ${aws_instance.kafka.private_ip}:9092
           command: ["sh","-c"]
           args:
             - pip install --no-cache-dir confluent-kafka==2.5.0 && python -u /code/consumer.py
@@ -670,7 +671,7 @@ spec:
             - name: ES_URL
               value: http://elasticsearch.platform.svc.cluster.local:9200
             - name: KAFKA_BOOTSTRAP
-              value: kafka.platform.svc.cluster.local:9092
+              value: ${aws_instance.kafka.private_ip}:9092
           command: ["sh","-c"]
           args:
             - pip install --no-cache-dir confluent-kafka==2.5.0 && python -u /code/consumer.py
@@ -684,124 +685,6 @@ spec:
             items:
               - key: consumer.py
                 path: consumer.py
-YAML
-
-
-  # ----------------------------
-  # Kafka values (Bitnami) - OPTIMIZED for Single Node
-  # ----------------------------
-  kafka_values = <<-YAML
-global:
-  security:
-    allowInsecureImages: true
-
-image:
-  registry: docker.io
-  repository: bitnamilegacy/kafka
-  tag: 4.0.0-debian-12-r10
-  pullPolicy: IfNotPresent
-
-auth:
-  clientProtocol: plaintext
-  interBrokerProtocol: plaintext
-
-kraft:
-  enabled: true
-
-zookeeper:
-  enabled: false
-
-# CONTROLLER
-controller:
-  replicaCount: 1
-  controllerOnly: true
-  persistence:
-    enabled: true
-    size: 5Gi
-    storageClass: "local-path"
-  # FIX: Limit Heap to prevent OOM
-  heapOpts: "-Xmx512m -Xms512m"
-  extraEnvVars:
-    - name: KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR
-      value: "1"
-    - name: KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
-      value: "1"
-    - name: KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR
-      value: "1"
-    - name: KAFKA_CFG_DEFAULT_REPLICATION_FACTOR
-      value: "1"
-    - name: KAFKA_CFG_MIN_INSYNC_REPLICAS
-      value: "1"
-    - name: KAFKA_CFG_GROUP_INITIAL_REBALANCE_DELAY_MS
-      value: "0"
-    - name: KAFKA_CFG_OFFSETS_TOPIC_NUM_PARTITIONS
-      value: "10"
-  extraConfig: |-
-    offsets.topic.replication.factor=1
-    transaction.state.log.replication.factor=1
-    transaction.state.log.min.isr=1
-    default.replication.factor=1
-    min.insync.replicas=1
-    offsets.topic.num.partitions=10
-
-# BROKER
-broker:
-  replicaCount: 1
-  persistence:
-    enabled: true
-    size: 5Gi
-    storageClass: "local-path"
-  # FIX: Limit Heap to prevent OOM
-  heapOpts: "-Xmx512m -Xms512m"
-  
-  extraEnvVars:
-    - name: KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR
-      value: "1"
-    - name: KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
-      value: "1"
-    - name: KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR
-      value: "1"
-    - name: KAFKA_CFG_DEFAULT_REPLICATION_FACTOR
-      value: "1"
-    - name: KAFKA_CFG_MIN_INSYNC_REPLICAS
-      value: "1"
-    - name: KAFKA_CFG_GROUP_INITIAL_REBALANCE_DELAY_MS
-      value: "0"
-    - name: KAFKA_CFG_OFFSETS_TOPIC_NUM_PARTITIONS
-      value: "10"
-
-  extraConfig: |-
-    offsets.topic.replication.factor=1
-    default.replication.factor=1
-    min.insync.replicas=1
-    transaction.state.log.min.isr=1
-    transaction.state.log.replication.factor=1
-    auto.create.topics.enable=true
-    group.initial.rebalance.delay.ms=0
-    
-
-listeners:
-  client:
-    protocol: PLAINTEXT
-  interbroker:
-    protocol: PLAINTEXT
-  controller:
-    protocol: PLAINTEXT
-
-allowPlaintextListener: true
-
-provisioning:
-  enabled: true
-  topics:
-    - name: products
-      partitions: 1
-      replicationFactor: 1
-    - name: orders
-      partitions: 1
-      replicationFactor: 1
-    - name: suppliers
-      partitions: 1
-      replicationFactor: 1
 YAML
 
   # ----------------------------
@@ -853,20 +736,8 @@ if [ "${var.deploy_platform}" = "true" ]; then
   export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
   kubectl create namespace platform || true
 
-  rm -f /tmp/kafka-values.yaml /tmp/platform.yaml || true
-  aws s3 cp "s3://${aws_s3_bucket.data.bucket}/bootstrap/kafka-values.yaml" /tmp/kafka-values.yaml --region ${var.aws_region}
+  rm -f /tmp/platform.yaml || true
   aws s3 cp "s3://${aws_s3_bucket.data.bucket}/bootstrap/platform.yaml" /tmp/platform.yaml --region ${var.aws_region}
-
-  helm repo add bitnami https://charts.bitnami.com/bitnami || true
-  helm repo update || true
-
-  echo "[BOOT] Installing Kafka..."
-  helm upgrade --install --atomic --wait --timeout 20m kafka bitnami/kafka -n platform -f /tmp/kafka-values.yaml
-  echo "[BOOT] Kafka installed."
-
-  echo "[BOOT] Waiting for Kafka pods..."
-  # Wait specifically for broker to be ready
-  kubectl -n platform wait --for=condition=Ready pod -l app.kubernetes.io/component=broker --timeout=20m
 
   echo "[BOOT] Applying platform.yaml..."
   kubectl apply -f /tmp/platform.yaml
@@ -980,41 +851,66 @@ data "aws_ami" "ubuntu" {
 # ----------------------------
 
 resource "aws_instance" "k3s_master" {
-  ami                         = data.aws_ami.ubuntu.id
-  instance_type               = var.master_instance_type
-  subnet_id                   = local.lambda_subnets[0]
-  vpc_security_group_ids      = [aws_security_group.project.id]
-  iam_instance_profile        = aws_iam_instance_profile.ec2_profile.name
-  
+  ami                    = data.aws_ami.ubuntu.id
+  instance_type          = var.master_instance_type
+  subnet_id              = local.lambda_subnets[0]
+  vpc_security_group_ids = [aws_security_group.project.id]
+  iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
+
   # --- FIX: Strip Windows line endings (\r) so the script doesn't crash ---
   user_data                   = replace(local.master_user_data, "\r", "")
   user_data_replace_on_change = true
-  
+
   associate_public_ip_address = true
-  key_name   = var.ssh_key_name != "" ? var.ssh_key_name : null
-  
-  depends_on = [aws_s3_object.kafka_values, aws_s3_object.platform_yaml]
+  key_name                    = var.ssh_key_name != "" ? var.ssh_key_name : null
+
+  depends_on = [aws_instance.kafka, aws_s3_object.platform_yaml]
 
   tags = { Name = "${var.project_name}-k3s-master" }
 }
 
 resource "aws_instance" "k3s_worker" {
-  ami                         = data.aws_ami.ubuntu.id
-  instance_type               = var.worker_instance_type
-  subnet_id                   = local.lambda_subnets[1]
-  vpc_security_group_ids      = [aws_security_group.project.id]
-  iam_instance_profile        = aws_iam_instance_profile.ec2_profile.name
-  
+  ami                    = data.aws_ami.ubuntu.id
+  instance_type          = var.worker_instance_type
+  subnet_id              = local.lambda_subnets[1]
+  vpc_security_group_ids = [aws_security_group.project.id]
+  iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
+
   # --- FIX: Strip Windows line endings (\r) so the script doesn't crash ---
   user_data                   = replace(local.worker_user_data, "\r", "")
   user_data_replace_on_change = true
-  
+
   associate_public_ip_address = true
-  key_name   = var.ssh_key_name != "" ? var.ssh_key_name : null
-  
+  key_name                    = var.ssh_key_name != "" ? var.ssh_key_name : null
+
   depends_on = [aws_instance.k3s_master]
 
   tags = { Name = "${var.project_name}-k3s-worker" }
+}
+
+resource "aws_instance" "kafka" {
+  ami                    = data.aws_ami.ubuntu.id
+  instance_type          = var.worker_instance_type
+  vpc_security_group_ids = [aws_security_group.project.id]
+  key_name               = var.ssh_key_name
+  user_data              = <<-EOF
+                            #!/bin/bash
+                            apt-get update -y
+                            apt-get install -y openjdk-17-jre
+                            wget https://dlcdn.apache.org/kafka/4.1.1/kafka_2.13-4.1.1.tgz
+                            tar -xzf kafka_2.13-4.1.1.tgz -C /opt/
+                            cd /opt/kafka_2.13-4.1.1
+                            PRIVATE_IP=$(hostname -I | awk '{print $1}')
+                            echo "advertised.listeners=PLAINTEXT://$PRIVATE_IP:9092" >> config/server.properties
+                            KAFKA_CLUSTER_ID="$(bin/kafka-storage.sh random-uuid)"
+                            bin/kafka-storage.sh format --standalone -t $KAFKA_CLUSTER_ID -c config/server.properties
+                            bin/kafka-server-start.sh -daemon config/server.properties
+                            sleep 10
+                            bin/kafka-topics.sh --create --topic orders --bootstrap-server localhost:9092
+                            bin/kafka-topics.sh --create --topic suppliers --bootstrap-server localhost:9092
+                            bin/kafka-topics.sh --create --topic products --bootstrap-server localhost:9092
+                            EOF
+  tags                   = { Name = "kafka" }
 }
 
 # ----------------------------
@@ -1028,19 +924,13 @@ resource "aws_s3_bucket" "data" {
   bucket = "${var.project_name}-data-${random_id.suffix.hex}"
 }
 
-resource "aws_s3_object" "kafka_values" {
-  bucket       = aws_s3_bucket.data.bucket
-  key          = "bootstrap/kafka-values.yaml"
-  content      = local.kafka_values
-  content_type = "text/yaml"
-}
-
 resource "aws_s3_object" "platform_yaml" {
   bucket       = aws_s3_bucket.data.bucket
   key          = "bootstrap/platform.yaml"
   content      = local.platform_yaml
   content_type = "text/yaml"
 }
+
 
 # ----------------------------
 # IAM for Lambda
@@ -1112,7 +1002,7 @@ resource "aws_lambda_function" "api_producer" {
 
   filename         = data.archive_file.api_lambda_zip.output_path
   source_code_hash = data.archive_file.api_lambda_zip.output_base64sha256
-  timeout          = 10
+  timeout          = 300
 
   vpc_config {
     subnet_ids         = local.lambda_subnets
@@ -1136,7 +1026,7 @@ resource "aws_lambda_function" "s3_producer" {
 
   filename         = data.archive_file.s3_lambda_zip.output_path
   source_code_hash = data.archive_file.s3_lambda_zip.output_base64sha256
-  timeout          = 10
+  timeout          = 300
 
   vpc_config {
     subnet_ids         = local.lambda_subnets
@@ -1158,7 +1048,7 @@ resource "aws_s3_bucket_notification" "notify" {
   lambda_function {
     lambda_function_arn = aws_lambda_function.s3_producer.arn
     events              = ["s3:ObjectCreated:*"]
-    filter_prefix       = var.data_prefix
+    filter_suffix       = ".json"
   }
 
   depends_on = [aws_lambda_permission.allow_s3]
