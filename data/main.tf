@@ -282,6 +282,23 @@ data:
     BULK_DOCS = int(os.getenv("BULK_DOCS", "500"))
     FLUSH_SECS = float(os.getenv("FLUSH_SECS", "3.0"))
 
+    def wait_for_kafka():
+      while True:
+        try:
+          c0 = Consumer({
+            "bootstrap.servers": BOOTSTRAP,
+            "group.id": f"{GROUP}-bootstrap-check",
+            "enable.auto.commit": False,
+            "socket.timeout.ms": 3000,
+            "session.timeout.ms": 6000,
+          })
+          c0.list_topics(timeout=5)
+          c0.close()
+          return
+        except Exception as e:
+          print(f"[consumer] waiting for kafka at {BOOTSTRAP}: {e}", flush=True)
+          time.sleep(3)
+
     def http(method, url, body_bytes=None, headers=None, timeout=60):
       req = urllib.request.Request(url, data=body_bytes, headers=headers or {}, method=method)
       try:
@@ -342,14 +359,22 @@ data:
 
     if __name__ == "__main__":
       # Wait for ES to be up
-      time.sleep(5)
+      print(f"[consumer] waiting for ES at {ES}...", flush=True)
+      while True:
+        st, _ = http("GET", ES, timeout=5)
+        if st == 200:
+          break
+        time.sleep(5)
       ensure_index()
+      print(f"[consumer] waiting for Kafka at {BOOTSTRAP}...", flush=True)
+      wait_for_kafka()
 
       c = Consumer({
         "bootstrap.servers": BOOTSTRAP,
         "group.id": GROUP,
         "auto.offset.reset": "earliest",
         "enable.auto.commit": False,
+        "debug": "cgrp,topic,fetch",
       })
       c.subscribe([TOPIC])
 
@@ -369,6 +394,7 @@ data:
             print("[consumer] error:", msg.error(), flush=True)
           else:
             try:
+              print(f"[consumer] received message offset={msg.offset()}", flush=True)
               payload = json.loads(msg.value().decode("utf-8"))
               if isinstance(payload, list):
                 for item in payload:
@@ -695,6 +721,28 @@ controller:
     storageClass: "local-path"
   # FIX: Limit Heap to prevent OOM
   heapOpts: "-Xmx512m -Xms512m"
+  extraEnvVars:
+    - name: KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR
+      value: "1"
+    - name: KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+      value: "1"
+    - name: KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR
+      value: "1"
+    - name: KAFKA_CFG_DEFAULT_REPLICATION_FACTOR
+      value: "1"
+    - name: KAFKA_CFG_MIN_INSYNC_REPLICAS
+      value: "1"
+    - name: KAFKA_CFG_GROUP_INITIAL_REBALANCE_DELAY_MS
+      value: "0"
+    - name: KAFKA_CFG_OFFSETS_TOPIC_NUM_PARTITIONS
+      value: "10"
+  extraConfig: |-
+    offsets.topic.replication.factor=1
+    transaction.state.log.replication.factor=1
+    transaction.state.log.min.isr=1
+    default.replication.factor=1
+    min.insync.replicas=1
+    offsets.topic.num.partitions=10
 
 # BROKER
 broker:
@@ -717,6 +765,10 @@ broker:
       value: "1"
     - name: KAFKA_CFG_MIN_INSYNC_REPLICAS
       value: "1"
+    - name: KAFKA_CFG_GROUP_INITIAL_REBALANCE_DELAY_MS
+      value: "0"
+    - name: KAFKA_CFG_OFFSETS_TOPIC_NUM_PARTITIONS
+      value: "10"
 
   extraConfig: |-
     offsets.topic.replication.factor=1
