@@ -143,6 +143,7 @@ PY
   # Lambda code: S3 producer
   # ----------------------------
   s3_lambda_py = <<-PY
+# ...existing code...
 import json
 import os
 import urllib.request
@@ -153,16 +154,23 @@ BRIDGE_BASE = os.environ["BRIDGE_BASE"].rstrip("/")
 
 def _post(topic: str, payload: dict):
     url = f"{BRIDGE_BASE}/topics/{topic}"
+    print(f"Sending payload to {url}...", flush=True)
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers={"Content-Type":"application/json"}, method="POST")
-    with urllib.request.urlopen(req, timeout=5) as resp:
-        return resp.read().decode("utf-8")
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return resp.read().decode("utf-8")
+    except Exception as e:
+        print(f"POST failed to {url}: {e}", flush=True)
+        raise e
 
 def handler(event, context):
     try:
         rec = event["Records"][0]
         bucket = rec["s3"]["bucket"]["name"]
         key = rec["s3"]["object"]["key"]
+
+        print(f"Processing S3 object: {bucket}/{key}", flush=True)
 
         obj = s3.get_object(Bucket=bucket, Key=key)
         raw = obj["Body"].read().decode("utf-8")
@@ -176,17 +184,20 @@ def handler(event, context):
         elif "suppliers" in lower:
             topic = "suppliers"
         else:
+            print(f"Skipping key {key}: no matching topic found", flush=True)
             return {"statusCode": 200, "body": "Ignored"}
 
         if isinstance(data, list):
+            print(f"Posting {len(data)} items to topic '{topic}'", flush=True)
             for item in data:
                 _post(topic, item)
         else:
+            print(f"Posting single item to topic '{topic}'", flush=True)
             _post(topic, data)
 
         return {"statusCode": 200, "body": "OK"}
     except Exception as e:
-        print(f"Error processing S3 file: {str(e)}")
+        print(f"Error processing S3 file: {str(e)}", flush=True)
         # We return 200 to stop S3 from retrying infinitely on bad data
         return {"statusCode": 200, "body": "Error Handled"}
 PY
@@ -1041,6 +1052,21 @@ resource "aws_lambda_function" "s3_producer" {
 
   depends_on = [aws_instance.k3s_master]
 }
+
+resource "aws_vpc_endpoint" "s3" {
+  vpc_id            = data.aws_vpc.default.id
+  service_name      = "com.amazonaws.${var.aws_region}.s3"
+  vpc_endpoint_type = "Gateway"
+
+  # CRITICAL: This adds the route to S3 in these specific route tables.
+  # Use the route table ID(s) associated with your Lambda's private subnets.
+  route_table_ids = [data.aws_vpc.default.main_route_table_id]
+
+  tags = {
+    Name = "s3-gateway-endpoint"
+  }
+}
+
 
 resource "aws_s3_bucket_notification" "notify" {
   bucket = aws_s3_bucket.data.id
