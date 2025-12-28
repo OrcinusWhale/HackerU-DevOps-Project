@@ -102,9 +102,9 @@ import urllib.request
 
 BRIDGE_BASE = os.environ["BRIDGE_BASE"].rstrip("/")
 
-def _post(topic: str, payload: dict):
+def _post(partition: str, payload: dict):
     # Set timeout to 5s so Lambda doesn't hang if EC2 is down
-    url = f"{BRIDGE_BASE}/topics/{topic}"
+    url = f"{BRIDGE_BASE}/partition/{partition}"
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers={"Content-Type":"application/json"}, method="POST")
     
@@ -124,16 +124,16 @@ def handler(event, context):
         return {"statusCode": 400, "body": "Invalid JSON"}
 
     if path.startswith("/products"):
-        topic = "products"
+        partition = "0"
     elif path.startswith("/orders"):
-        topic = "orders"
+        partition = "1"
     elif path.startswith("/suppliers"):
-        topic = "suppliers"
+        partition = "2"
     else:
         return {"statusCode": 404, "body": "Unknown route"}
 
     try:
-        _post(topic, payload)
+        _post(partition, payload)
         return {"statusCode": 200, "body": "OK"}
     except Exception as e:
         return {"statusCode": 502, "body": f"Bridge Error: {str(e)}"}
@@ -152,8 +152,8 @@ import boto3
 s3 = boto3.client("s3")
 BRIDGE_BASE = os.environ["BRIDGE_BASE"].rstrip("/")
 
-def _post(topic: str, payload: dict):
-    url = f"{BRIDGE_BASE}/topics/{topic}"
+def _post(partition: str, payload: dict):
+    url = f"{BRIDGE_BASE}/partition/{partition}"
     print(f"Sending payload to {url}...", flush=True)
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers={"Content-Type":"application/json"}, method="POST")
@@ -178,22 +178,22 @@ def handler(event, context):
 
         lower = key.lower()
         if "products" in lower:
-            topic = "products"
+            partition = "0"
         elif "orders" in lower:
-            topic = "orders"
+            partition = "1"
         elif "suppliers" in lower:
-            topic = "suppliers"
+            partition = "2"
         else:
             print(f"Skipping key {key}: no matching topic found", flush=True)
             return {"statusCode": 200, "body": "Ignored"}
 
         if isinstance(data, list):
-            print(f"Posting {len(data)} items to topic '{topic}'", flush=True)
+            print(f"Posting {len(data)} items to partition '{partition}'", flush=True)
             for item in data:
-                _post(topic, item)
+                _post(partition, item)
         else:
-            print(f"Posting single item to topic '{topic}'", flush=True)
-            _post(topic, data)
+            print(f"Posting single item to partition '{partition}'", flush=True)
+            _post(partition, data)
 
         return {"statusCode": 200, "body": "OK"}
     except Exception as e:
@@ -224,7 +224,6 @@ data:
 
     BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP","${aws_instance.kafka.private_ip}:9092")
     
-    # FIX: Low timeouts to fail fast before Lambda times out
     print(BOOTSTRAP)
     conf = {
         "bootstrap.servers": BOOTSTRAP,
@@ -237,10 +236,10 @@ data:
     class H(BaseHTTPRequestHandler):
       def do_POST(self):
         parts = self.path.strip("/").split("/")
-        if len(parts) != 2 or parts[0] != "topics":
+        if len(parts) != 2 or parts[0] != "partition" or parts[1] not in ["0", "1", "2"]:
           self.send_response(404); self.end_headers(); return
 
-        topic = parts[1]
+        partition = int(parts[1])
         length = int(self.headers.get("Content-Length","0"))
         body = self.rfile.read(length).decode("utf-8") if length>0 else "{}"
 
@@ -253,10 +252,10 @@ data:
           payload = json.loads(body)
           if isinstance(payload, list):
             for item in payload:
-              p.produce(topic, json.dumps(item).encode("utf-8"), callback=delivery_report)
+              p.produce("ecommerce", json.dumps(item).encode("utf-8"), callback=delivery_report, partition=partition)
               p.poll(0)
           else:
-            p.produce(topic, json.dumps(payload).encode("utf-8"), callback=delivery_report)
+            p.produce("ecommerce", json.dumps(payload).encode("utf-8"), callback=delivery_report, partition=partition)
           
           # FIX: Flush shorter than Lambda timeout
           remaining = p.flush(3.0) 
@@ -284,10 +283,9 @@ data:
     import urllib.error
     from confluent_kafka import Consumer
 
-    TOPIC = os.environ["TOPIC"]
-    INDEX = os.environ["INDEX"]
+    TOPIC = "ecommerce"
 
-    GROUP = os.environ.get("GROUP", f"{TOPIC}-cg")
+    GROUP = f"{TOPIC}-cg"
     BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP","${aws_instance.kafka.private_ip}:9092")
     ES = os.getenv("ES_URL","http://elasticsearch.platform.svc.cluster.local:9200").rstrip("/")
 
@@ -321,12 +319,11 @@ data:
       except Exception as e:
         return 0, str(e).encode("utf-8","ignore")
 
-    def ensure_index():
-      st, _ = http("HEAD", f"{ES}/{INDEX}", timeout=5)
+    def ensure_index(index):
+      st, _ = http("HEAD", f"{ES}/{index}", timeout=5)
       if st == 200:
         return
 
-      # FIX: Removed explicit properties. Now supports Orders, Products, and Suppliers dynamically.
       mapping = {
         "settings": {"number_of_shards": 1, "number_of_replicas": 0},
         "mappings": {
@@ -336,15 +333,15 @@ data:
 
       st, data = http(
         "PUT",
-        f"{ES}/{INDEX}",
+        f"{ES}/{index}",
         body_bytes=json.dumps(mapping).encode("utf-8"),
         headers={"Content-Type":"application/json"},
         timeout=30
       )
       if st not in (200, 201):
-        print(f"[consumer] create index {INDEX} failed:", st, data[:300].decode("utf-8","ignore"), flush=True)
+        print(f"[consumer] create index {index} failed:", st, data[:300].decode("utf-8","ignore"), flush=True)
 
-    def bulk_index(pairs):
+    def bulk_index(pairs, index):
       lines = []
       for doc_id, doc in pairs:
         lines.append(json.dumps({"index": {"_id": doc_id}}))
@@ -353,7 +350,7 @@ data:
 
       st, data = http(
         "POST",
-        f"{ES}/{INDEX}/_bulk?refresh=false",
+        f"{ES}/{index}/_bulk?refresh=false",
         body_bytes=body,
         headers={"Content-Type":"application/x-ndjson"},
         timeout=60
@@ -367,7 +364,7 @@ data:
           i = item.get("index", {})
           if "error" in i:
              # Just log error, don't crash, so we process the valid ones
-             print(f"[consumer] item error in {INDEX}: {i['error']}", flush=True)
+             print(f"[consumer] item error in {index}: {i['error']}", flush=True)
 
     if __name__ == "__main__":
       # Wait for ES to be up
@@ -377,7 +374,9 @@ data:
         if st == 200:
           break
         time.sleep(5)
-      ensure_index()
+      ensure_index("products")
+      ensure_index("orders")
+      ensure_index("suppliers")
       print(f"[consumer] waiting for Kafka at {BOOTSTRAP}...", flush=True)
       wait_for_kafka()
 
@@ -386,14 +385,14 @@ data:
         "group.id": GROUP,
         "auto.offset.reset": "earliest",
         "enable.auto.commit": False,
-        "debug": "cgrp,topic,fetch",
       })
       c.subscribe([TOPIC])
 
-      print(f"[consumer] topic={TOPIC} index={INDEX} bulk_docs={BULK_DOCS} flush_secs={FLUSH_SECS}", flush=True)
+      print(f"[consumer] topic=ecommerce bulk_docs={BULK_DOCS} flush_secs={FLUSH_SECS}", flush=True)
 
-      buf = []
-      last_flush = time.time()
+      buf = [[], [], []]
+      indexes = ("products", "orders", "suppliers")
+      last_flush = [time.time(), time.time(), time.time()]
       last_msg = None
       list_counter = 0
 
@@ -407,31 +406,32 @@ data:
           else:
             try:
               print(f"[consumer] received message offset={msg.offset()}", flush=True)
+              partition = msg.partition()
               payload = json.loads(msg.value().decode("utf-8"))
               if isinstance(payload, list):
                 for item in payload:
-                  doc_id = str(item.get("id") or f"{msg.topic()}-{msg.partition()}-{msg.offset()}-{list_counter}")
+                  doc_id = str(item.get("id") or f"{msg.topic()}-{partition}-{msg.offset()}-{list_counter}")
                   list_counter += 1
-                  buf.append((doc_id, item))
+                  buf[partition].append((doc_id, item))
               else:
-                doc_id = str(payload.get("id") or f"{msg.topic()}-{msg.partition()}-{msg.offset()}")
-                buf.append((doc_id, payload))
+                doc_id = str(payload.get("id") or f"{msg.topic()}-{partition}-{msg.offset()}")
+                buf[partition].append((doc_id, payload))
               last_msg = msg
             except Exception as e:
               print("[consumer] bad message:", e, flush=True)
-
-        if buf and (len(buf) >= BULK_DOCS or (now - last_flush) >= FLUSH_SECS):
-          try:
-            bulk_index(buf)
-            print(f"[consumer] bulk indexed {len(buf)} docs into {INDEX}", flush=True)
-            if last_msg is not None:
-              c.commit(message=last_msg, asynchronous=False)
-          except Exception as e:
-            print("[consumer] bulk failed (will retry):", e, flush=True)
-          finally:
-            buf = []
-            last_flush = now
-            list_counter = 0
+        for i in range(3):
+          if buf[i] and (len(buf[i]) >= BULK_DOCS or (now - last_flush[i]) >= FLUSH_SECS):
+            try:
+              bulk_index(buf[i], indexes[i])
+              print(f"[consumer] bulk indexed {len(buf[i])} docs into {indexes[i]}", flush=True)
+              if last_msg is not None:
+                c.commit(message=last_msg, asynchronous=False)
+            except Exception as e:
+              print("[consumer] bulk failed (will retry):", e, flush=True)
+            finally:
+              buf[i] = []
+              last_flush[i] = now
+              list_counter = 0
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -577,15 +577,15 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: consumer-products
+  name: consumer
   namespace: platform
 spec:
-  replicas: 1
+  replicas: 3
   selector:
-    matchLabels: { app: consumer-products }
+    matchLabels: { app: consumer }
   template:
     metadata:
-      labels: { app: consumer-products }
+      labels: { app: consumer }
     spec:
       containers:
         - name: c
@@ -593,92 +593,6 @@ spec:
           env:
             - name: PYTHONUNBUFFERED
               value: "1"
-            - name: TOPIC
-              value: products
-            - name: INDEX
-              value: products-index
-            - name: ES_URL
-              value: http://elasticsearch.platform.svc.cluster.local:9200
-            - name: KAFKA_BOOTSTRAP
-              value: ${aws_instance.kafka.private_ip}:9092
-          command: ["sh","-c"]
-          args:
-            - pip install --no-cache-dir confluent-kafka==2.5.0 && python -u /code/consumer.py
-          volumeMounts:
-            - name: code
-              mountPath: /code
-      volumes:
-        - name: code
-          configMap:
-            name: app-code
-            items:
-              - key: consumer.py
-                path: consumer.py
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: consumer-orders
-  namespace: platform
-spec:
-  replicas: 1
-  selector:
-    matchLabels: { app: consumer-orders }
-  template:
-    metadata:
-      labels: { app: consumer-orders }
-    spec:
-      containers:
-        - name: c
-          image: python:3.11-slim
-          env:
-            - name: PYTHONUNBUFFERED
-              value: "1"
-            - name: TOPIC
-              value: orders
-            - name: INDEX
-              value: orders-index
-            - name: ES_URL
-              value: http://elasticsearch.platform.svc.cluster.local:9200
-            - name: KAFKA_BOOTSTRAP
-              value: ${aws_instance.kafka.private_ip}:9092
-          command: ["sh","-c"]
-          args:
-            - pip install --no-cache-dir confluent-kafka==2.5.0 && python -u /code/consumer.py
-          volumeMounts:
-            - name: code
-              mountPath: /code
-      volumes:
-        - name: code
-          configMap:
-            name: app-code
-            items:
-              - key: consumer.py
-                path: consumer.py
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: consumer-suppliers
-  namespace: platform
-spec:
-  replicas: 1
-  selector:
-    matchLabels: { app: consumer-suppliers }
-  template:
-    metadata:
-      labels: { app: consumer-suppliers }
-    spec:
-      containers:
-        - name: c
-          image: python:3.11-slim
-          env:
-            - name: PYTHONUNBUFFERED
-              value: "1"
-            - name: TOPIC
-              value: suppliers
-            - name: INDEX
-              value: suppliers-index
             - name: ES_URL
               value: http://elasticsearch.platform.svc.cluster.local:9200
             - name: KAFKA_BOOTSTRAP
@@ -868,7 +782,6 @@ resource "aws_instance" "k3s_master" {
   vpc_security_group_ids = [aws_security_group.project.id]
   iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
 
-  # --- FIX: Strip Windows line endings (\r) so the script doesn't crash ---
   user_data                   = replace(local.master_user_data, "\r", "")
   user_data_replace_on_change = true
 
@@ -887,7 +800,6 @@ resource "aws_instance" "k3s_worker" {
   vpc_security_group_ids = [aws_security_group.project.id]
   iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
 
-  # --- FIX: Strip Windows line endings (\r) so the script doesn't crash ---
   user_data                   = replace(local.worker_user_data, "\r", "")
   user_data_replace_on_change = true
 
@@ -917,9 +829,7 @@ resource "aws_instance" "kafka" {
                             bin/kafka-storage.sh format --standalone -t $KAFKA_CLUSTER_ID -c config/server.properties
                             bin/kafka-server-start.sh -daemon config/server.properties
                             sleep 10
-                            bin/kafka-topics.sh --create --topic orders --bootstrap-server localhost:9092
-                            bin/kafka-topics.sh --create --topic suppliers --bootstrap-server localhost:9092
-                            bin/kafka-topics.sh --create --topic products --bootstrap-server localhost:9092
+                            bin/kafka-topics.sh --create --topic ecommerce --partitions 3 --bootstrap-server localhost:9092
                             EOF
   tags                   = { Name = "kafka" }
 }
