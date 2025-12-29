@@ -287,7 +287,7 @@ data:
 
     GROUP = f"{TOPIC}-cg"
     BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP","${aws_instance.kafka.private_ip}:9092")
-    ES = os.getenv("ES_URL","http://elasticsearch.platform.svc.cluster.local:9200").rstrip("/")
+    ES = "http://${aws_lb.elastic_lb.dns_name}"
 
     BULK_DOCS = int(os.getenv("BULK_DOCS", "500"))
     FLUSH_SECS = float(os.getenv("FLUSH_SECS", "3.0"))
@@ -593,8 +593,6 @@ spec:
           env:
             - name: PYTHONUNBUFFERED
               value: "1"
-            - name: ES_URL
-              value: http://elasticsearch.platform.svc.cluster.local:9200
             - name: KAFKA_BOOTSTRAP
               value: ${aws_instance.kafka.private_ip}:9092
           command: ["sh","-c"]
@@ -788,7 +786,7 @@ resource "aws_instance" "k3s_master" {
   associate_public_ip_address = true
   key_name                    = var.ssh_key_name != "" ? var.ssh_key_name : null
 
-  depends_on = [aws_instance.kafka, aws_s3_object.platform_yaml]
+  depends_on = [aws_instance.kafka, aws_s3_object.platform_yaml, aws_lb.elastic_lb]
 
   tags = { Name = "${var.project_name}-k3s-master" }
 }
@@ -832,6 +830,59 @@ resource "aws_instance" "kafka" {
                             bin/kafka-topics.sh --create --topic ecommerce --partitions 3 --bootstrap-server localhost:9092
                             EOF
   tags                   = { Name = "kafka" }
+}
+
+# 2. Create the Application Load Balancer
+resource "aws_lb" "elastic_lb" {
+  name               = "elastic-alb"
+  internal           = true # Set to false if you need public access (not recommended for DBs)
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.project.id]
+  subnets            = data.aws_subnets.default.ids # List of subnet IDs
+
+  enable_deletion_protection = false
+}
+
+# 3. Create the Target Group
+resource "aws_lb_target_group" "elastic_tg" {
+  name     = "elastic-tg"
+  port     = var.elasticsearch_nodeport
+  protocol = "HTTP"
+  vpc_id   = data.aws_vpc.default.id
+
+  # CRITICAL: Elastic Health Check
+  # We check /_cluster/health to ensure the service is actually ready
+  health_check {
+    path                = "/_cluster/health"
+    port                = var.elasticsearch_nodeport
+    protocol            = "HTTP"
+    healthy_threshold   = 3
+    unhealthy_threshold = 3
+    timeout             = 5
+    interval            = 30
+    matcher             = "200"
+  }
+}
+
+# 4. Create the Listener (Listens on Port 80, forwards to 9200)
+resource "aws_lb_listener" "front_end" {
+  load_balancer_arn = aws_lb.elastic_lb.arn
+  port              = "80"
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.elastic_tg.arn
+  }
+}
+
+# 5. Attach your Elastic EC2 Instances to the Target Group
+# Assuming you have a list of instance IDs or a resource named 'aws_instance.elastic'
+resource "aws_lb_target_group_attachment" "elastic_nodes" {
+  # If you have multiple nodes, use count or for_each
+  target_group_arn = aws_lb_target_group.elastic_tg.arn
+  target_id        = aws_instance.k3s_master.id
+  port             = var.elasticsearch_nodeport
 }
 
 # ----------------------------
