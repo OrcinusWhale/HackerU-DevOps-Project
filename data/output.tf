@@ -4,7 +4,6 @@ output "k3s_master_public_ip" {
 }
 
 output "k3s_worker_public_ips" {
-  # CHANGED: Added [*] to handle multiple worker nodes (since node_count is 2)
   value       = aws_instance.k3s_worker[*].public_ip
   description = "Public IPs of the k3s worker nodes"
 }

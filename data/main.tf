@@ -1,3 +1,4 @@
+# Terraform + provider versions
 terraform {
   required_version = ">= 1.5.0"
   required_providers {
@@ -16,13 +17,12 @@ terraform {
   }
 }
 
+# AWS region
 provider "aws" {
   region = var.aws_region
 }
 
-# ----------------------------
-# Use default VPC/Subnets/SG
-# ----------------------------
+# Use the default VPC + its subnets
 data "aws_vpc" "default" {
   default = true
 }
@@ -34,11 +34,11 @@ data "aws_subnets" "default" {
   }
 }
 
+# Security group for SSH + NodePorts + internal traffic
 resource "aws_security_group" "project" {
   name   = "${var.project_name}-sg"
   vpc_id = data.aws_vpc.default.id
 
-  # SSH from your PC
   ingress {
     description = "SSH"
     from_port   = 22
@@ -47,7 +47,6 @@ resource "aws_security_group" "project" {
     cidr_blocks = [var.ssh_allowed_cidr]
   }
 
-  # NodePorts
   ingress {
     description = "Kafka REST Bridge NodePort"
     from_port   = var.bridge_nodeport
@@ -72,7 +71,6 @@ resource "aws_security_group" "project" {
     cidr_blocks = [var.ssh_allowed_cidr]
   }
 
-  # Intra-SG traffic
   ingress {
     description = "intra-sg"
     from_port   = 0
@@ -90,11 +88,10 @@ resource "aws_security_group" "project" {
 }
 
 locals {
+  # Pick two subnets for the private stuff (Lambda + instances)
   lambda_subnets = slice(data.aws_subnets.default.ids, 0, 2)
 
-  # ----------------------------
-  # Lambda code: API producer
-  # ----------------------------
+  # Lambda code for the API -> Kafka bridge producer
   api_lambda_py = <<-PY
 import json
 import os
@@ -139,9 +136,7 @@ def handler(event, context):
         return {"statusCode": 502, "body": f"Bridge Error: {str(e)}"}
 PY
 
-  # ----------------------------
-  # Lambda code: S3 producer
-  # ----------------------------
+  # Lambda code for S3 -> Kafka bridge producer
   s3_lambda_py = <<-PY
 # ...existing code...
 import json
@@ -202,9 +197,7 @@ def handler(event, context):
         return {"statusCode": 200, "body": "Error Handled"}
 PY
 
-  # ----------------------------
-  # Platform YAML (Kubernetes Manifests)
-  # ----------------------------
+  # Kubernetes manifests for the platform apps
   platform_yaml = <<-YAML
 apiVersion: v1
 kind: Namespace
@@ -610,9 +603,7 @@ spec:
                 path: consumer.py
 YAML
 
-  # ----------------------------
-  # Master Bootstrap Script
-  # ----------------------------
+  # Bootstrap scripts for master/worker nodes
   master_user_data = <<EOF
 #!/bin/bash
 set -euo pipefail
@@ -621,28 +612,18 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 apt-get install -y curl unzip ca-certificates awscli
 
-# --- FIX START: ELASTICSEARCH MEMORY ---
-# Set the limit immediately and make it persistent
 sysctl -w vm.max_map_count=262144
 echo "vm.max_map_count=262144" >> /etc/sysctl.conf
-# --- FIX END ---
 
-# --- FIX START: STORAGE PERMISSIONS ---
-# Create a cron job that forces storage to be writable every minute.
-# This ensures that whenever K3s creates a new volume folder, it gets fixed automatically.
 mkdir -p /var/lib/rancher/k3s/storage
 echo "* * * * * root chmod -R 777 /var/lib/rancher/k3s/storage >/dev/null 2>&1" > /etc/cron.d/fix-storage
 chmod 0644 /etc/cron.d/fix-storage
-# --- FIX END ---
 
-# Avoid low ulimit issues on tiny instances (Kafka/ES)
 ulimit -n 65536 || true
 
-# ---- SSM agent ----
 snap install amazon-ssm-agent --classic || true
 systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent.service || true
 
-# ---- k3s server ----
 curl -sfL https://get.k3s.io | \
   K3S_TOKEN="${random_password.k3s_token.result}" \
   INSTALL_K3S_EXEC="server --write-kubeconfig-mode 644 --disable traefik --disable metrics-server" \
@@ -685,17 +666,12 @@ EOF
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
-# --- FIX START: ELASTICSEARCH MEMORY (CRITICAL FOR WORKERS) ---
 sysctl -w vm.max_map_count=262144
 echo "vm.max_map_count=262144" >> /etc/sysctl.conf
-# --- FIX END ---
 
-# --- FIX START: STORAGE PERMISSIONS ---
-# Forces the storage folder to be writable every minute.
 mkdir -p /var/lib/rancher/k3s/storage
 echo "* * * * * root chmod -R 777 /var/lib/rancher/k3s/storage >/dev/null 2>&1" > /etc/cron.d/fix-storage
 chmod 0644 /etc/cron.d/fix-storage
-# --- FIX END ---
 
 snap install amazon-ssm-agent --classic || true
 systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent.service || true
@@ -711,17 +687,14 @@ curl -sfL https://get.k3s.io | \
   sh -
 EOF
 }
-# ----------------------------
-# Random token for k3s join
-# ----------------------------
+
+# k3s join token
 resource "random_password" "k3s_token" {
   length  = 32
   special = false
 }
 
-# ----------------------------
-# IAM for EC2
-# ----------------------------
+# EC2 role + SSM access
 resource "aws_iam_role" "ec2_role" {
   name = "${var.project_name}-ec2-role"
   assume_role_policy = jsonencode({
@@ -757,9 +730,7 @@ resource "aws_iam_instance_profile" "ec2_profile" {
   role = aws_iam_role.ec2_role.name
 }
 
-# ----------------------------
-# EC2 instances (k3s master + worker)
-# ----------------------------
+# Ubuntu AMI for the instances
 data "aws_ami" "ubuntu" {
   most_recent = true
   owners      = ["099720109477"]
@@ -769,10 +740,7 @@ data "aws_ami" "ubuntu" {
   }
 }
 
-# ----------------------------
-# EC2 instances (k3s master + worker)
-# ----------------------------
-
+# k3s master node
 resource "aws_instance" "k3s_master" {
   ami                    = data.aws_ami.ubuntu.id
   instance_type          = var.master_instance_type
@@ -791,6 +759,7 @@ resource "aws_instance" "k3s_master" {
   tags = { Name = "${var.project_name}-k3s-master" }
 }
 
+# k3s worker node
 resource "aws_instance" "k3s_worker" {
   ami                    = data.aws_ami.ubuntu.id
   instance_type          = var.worker_instance_type
@@ -809,6 +778,7 @@ resource "aws_instance" "k3s_worker" {
   tags = { Name = "${var.project_name}-k3s-worker" }
 }
 
+# Kafka EC2 node (standalone)
 resource "aws_instance" "kafka" {
   ami                    = data.aws_ami.ubuntu.id
   instance_type          = var.worker_instance_type
@@ -832,26 +802,24 @@ resource "aws_instance" "kafka" {
   tags                   = { Name = "kafka" }
 }
 
-# 2. Create the Application Load Balancer
+# Internal ALB for reaching Elasticsearch
 resource "aws_lb" "elastic_lb" {
   name               = "elastic-alb"
-  internal           = true # Set to false if you need public access (not recommended for DBs)
+  internal           = true
   load_balancer_type = "application"
   security_groups    = [aws_security_group.project.id]
-  subnets            = data.aws_subnets.default.ids # List of subnet IDs
+  subnets            = data.aws_subnets.default.ids
 
   enable_deletion_protection = false
 }
 
-# 3. Create the Target Group
+# Target group for Elasticsearch NodePort
 resource "aws_lb_target_group" "elastic_tg" {
   name     = "elastic-tg"
   port     = var.elasticsearch_nodeport
   protocol = "HTTP"
   vpc_id   = data.aws_vpc.default.id
 
-  # CRITICAL: Elastic Health Check
-  # We check /_cluster/health to ensure the service is actually ready
   health_check {
     path                = "/_cluster/health"
     port                = var.elasticsearch_nodeport
@@ -864,7 +832,7 @@ resource "aws_lb_target_group" "elastic_tg" {
   }
 }
 
-# 4. Create the Listener (Listens on Port 80, forwards to 9200)
+# Listener that forwards ALB traffic to Elasticsearch
 resource "aws_lb_listener" "front_end" {
   load_balancer_arn = aws_lb.elastic_lb.arn
   port              = "80"
@@ -876,26 +844,24 @@ resource "aws_lb_listener" "front_end" {
   }
 }
 
-# 5. Attach your Elastic EC2 Instances to the Target Group
-# Assuming you have a list of instance IDs or a resource named 'aws_instance.elastic'
+# Attach the k3s master to the Elasticsearch target group
 resource "aws_lb_target_group_attachment" "elastic_nodes" {
-  # If you have multiple nodes, use count or for_each
   target_group_arn = aws_lb_target_group.elastic_tg.arn
   target_id        = aws_instance.k3s_master.id
   port             = var.elasticsearch_nodeport
 }
 
-# ----------------------------
-# S3 bucket
-# ----------------------------
+# Random suffix for the bucket name
 resource "random_id" "suffix" {
   byte_length = 4
 }
 
+# S3 bucket for bootstrap files + JSON uploads
 resource "aws_s3_bucket" "data" {
   bucket = "${var.project_name}-data-${random_id.suffix.hex}"
 }
 
+# Upload the platform.yaml into the bucket
 resource "aws_s3_object" "platform_yaml" {
   bucket       = aws_s3_bucket.data.bucket
   key          = "bootstrap/platform.yaml"
@@ -903,10 +869,7 @@ resource "aws_s3_object" "platform_yaml" {
   content_type = "text/yaml"
 }
 
-
-# ----------------------------
-# IAM for Lambda
-# ----------------------------
+# Lambda execution role + basic permissions
 resource "aws_iam_role" "lambda_role" {
   name = "${var.project_name}-lambda-role"
   assume_role_policy = jsonencode({
@@ -942,9 +905,7 @@ resource "aws_iam_role_policy" "lambda_s3_read" {
   })
 }
 
-# ----------------------------
-# Package Lambdas
-# ----------------------------
+# Zip the Lambda code
 data "archive_file" "api_lambda_zip" {
   type        = "zip"
   output_path = "${path.module}/api_lambda.zip"
@@ -963,9 +924,7 @@ data "archive_file" "s3_lambda_zip" {
   }
 }
 
-# ----------------------------
-# Lambda functions
-# ----------------------------
+# Lambda for API Gateway -> Kafka bridge
 resource "aws_lambda_function" "api_producer" {
   function_name = "${var.project_name}-api-producer"
   role          = aws_iam_role.lambda_role.arn
@@ -990,6 +949,7 @@ resource "aws_lambda_function" "api_producer" {
   depends_on = [aws_instance.k3s_master]
 }
 
+# Lambda for S3 uploads -> Kafka bridge
 resource "aws_lambda_function" "s3_producer" {
   function_name = "${var.project_name}-s3-producer"
   role          = aws_iam_role.lambda_role.arn
@@ -1014,13 +974,12 @@ resource "aws_lambda_function" "s3_producer" {
   depends_on = [aws_instance.k3s_master]
 }
 
+# S3 gateway endpoint so Lambda can reach S3 privately
 resource "aws_vpc_endpoint" "s3" {
   vpc_id            = data.aws_vpc.default.id
   service_name      = "com.amazonaws.${var.aws_region}.s3"
   vpc_endpoint_type = "Gateway"
 
-  # CRITICAL: This adds the route to S3 in these specific route tables.
-  # Use the route table ID(s) associated with your Lambda's private subnets.
   route_table_ids = [data.aws_vpc.default.main_route_table_id]
 
   tags = {
@@ -1028,7 +987,7 @@ resource "aws_vpc_endpoint" "s3" {
   }
 }
 
-
+# S3 event -> trigger Lambda on JSON uploads
 resource "aws_s3_bucket_notification" "notify" {
   bucket = aws_s3_bucket.data.id
 
@@ -1049,9 +1008,7 @@ resource "aws_lambda_permission" "allow_s3" {
   source_arn    = aws_s3_bucket.data.arn
 }
 
-# ----------------------------
-# API Gateway
-# ----------------------------
+# HTTP API Gateway
 resource "aws_apigatewayv2_api" "http_api" {
   name          = "${var.project_name}-http-api"
   protocol_type = "HTTP"
