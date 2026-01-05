@@ -19,7 +19,7 @@ This repository implements the **DevOps course final project**: an **event‑dri
 6. **Kibana** visualizes data (dashboard)
 
 **2) S3 path**
-1. Upload JSON file to **S3** (prefix `ingest/…`)
+1. Upload JSON file to **S3** 
 2. S3 event → **Lambda (S3 Producer)**
 3. Lambda forwards payload to the **Kafka REST Bridge**
 4. Same Kafka → Consumers → Elasticsearch → Kibana flow
@@ -28,13 +28,11 @@ This repository implements the **DevOps course final project**: an **event‑dri
 
 ## Tech stack
 
-- **AWS:** EC2, IAM, S3, API Gateway (HTTP API), Lambda, Security Groups (default VPC/subnets are used)
-- **IaC:** Terraform (>= 1.5.0)
-- **Kubernetes:** k3s (master + worker on EC2)
-- **Messaging:** Kafka (Bitnami Helm chart, KRaft single‑node mode)
+- **AWS:** EC2, IAM, S3, API Gateway (HTTP API), Lambda, Security Groups 
+- **IaC:** Terraform 
+- **Kubernetes:** k3s 
+- **Messaging:** Kafka 
 - **Observability / Analytics:** Elasticsearch + Kibana
-
-> Note: CI/CD and container registries are out of scope for this assignment. fileciteturn3file0
 
 ---
 
@@ -122,9 +120,7 @@ sudo k3s kubectl -n platform get svc
 Follow consumer logs (useful for debugging ingestion):
 
 ```bash
-sudo k3s kubectl -n platform logs deploy/consumer-orders -f
-sudo k3s kubectl -n platform logs deploy/consumer-products -f
-sudo k3s kubectl -n platform logs deploy/consumer-suppliers -f
+sudo k3s kubectl -n platform logs deploy/consumer -f
 ```
 
 ---
@@ -143,12 +139,10 @@ curl -X POST "<http_api_suppliers_url>" -H "Content-Type: application/json" --da
 
 ### Option B — S3 upload (triggers S3 Lambda)
 
-Upload to the `ingest/` prefix:
-
 ```bash
-aws s3 cp products.json  s3://<s3_bucket_name>/ingest/products.json
-aws s3 cp orders.json    s3://<s3_bucket_name>/ingest/orders.json
-aws s3 cp suppliers.json s3://<s3_bucket_name>/ingest/suppliers.json
+aws s3 cp products.json  s3://<s3_bucket_name>/products.json
+aws s3 cp orders.json    s3://<s3_bucket_name>/orders.json
+aws s3 cp suppliers.json s3://<s3_bucket_name>/suppliers.json
 ```
 
 ---
@@ -176,13 +170,6 @@ Import the saved objects:
 **Kibana — Dashboard view (layout)**
 ![Kibana Dashboard (Alt)](docs/screenshots/kibana-dashboard-alt.png)
 
----
-
-## Notes / assumptions
-
-- Terraform uses the **default VPC + default subnets**, and creates a dedicated project Security Group.
-- NodePorts (Bridge/Kibana/Elasticsearch) are allowed only from `ssh_allowed_cidr`.
-- Kafka runs in **single‑node KRaft mode** for simplicity (suitable for coursework/testing).
 
 ---
 
