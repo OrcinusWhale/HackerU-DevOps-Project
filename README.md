@@ -1,6 +1,6 @@
 # DevOps Final Project — Event‑Driven Architecture & Observability (AWS + Kafka + K3s + Elastic)
 
-This repository implements the **DevOps course final project**: an **event‑driven pipeline** on AWS using **Terraform**, **Kafka**, **Kubernetes (k3s on EC2)**, and the **Elastic Stack (Elasticsearch + Kibana)** for observability and analytics. fileciteturn3file0
+This repository implements the **DevOps course final project**: an **event‑driven pipeline** on AWS using **Terraform**, **Kafka**, **Kubernetes (k3s on EC2)**, and the **Elastic Stack (Elasticsearch + Kibana)** for observability and analytics. 
 
 ---
 
