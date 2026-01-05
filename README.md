@@ -45,14 +45,14 @@ This repository implements the **DevOps course final project**: an **event‑dri
 ├── main.tf                 # Infra + k3s bootstrap + platform manifests
 ├── variables.tf            # Terraform variables (ports, instance types, etc.)
 ├── output.tf               # Public endpoints and useful outputs
-├── terraform.tfvars        # Your project values (IP allowlist, deploy flag, key name)
+├── terraform.tfvars        # Project values (IP allowlist, deploy flag, key name)
 ├── export.ndjson           # Kibana saved objects (dashboard + data views)
 ├── generate-data.py        # Generates demo datasets
 ├── products.json
 ├── orders.json
 ├── suppliers.json
 └── docs/
-    └── screenshots/        # README images (add your screenshots here)
+    └── screenshots/        # README images 
 ```
 
 ---
