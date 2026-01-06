@@ -39,7 +39,7 @@ This repository implements the **DevOps course final project**: an **event‑dri
 ## Repository structure
 
 ```
-.
+data
 ├── main.tf                 # Infra + k3s bootstrap + platform manifests
 ├── variables.tf            # Terraform variables (ports, instance types, etc.)
 ├── output.tf               # Public endpoints and useful outputs
@@ -48,8 +48,8 @@ This repository implements the **DevOps course final project**: an **event‑dri
 ├── generate-data.py        # Generates demo datasets
 ├── products.json
 ├── orders.json
-├── suppliers.json
-└── docs/
+└── suppliers.json
+docs/
     └── screenshots/        # README images 
 ```
 
@@ -184,4 +184,4 @@ terraform destroy
 ## Authors
 
 - Itay Margolin
-- Evyatar Ben Avraham
+- Or Barer
